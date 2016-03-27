@@ -3,14 +3,14 @@ package org.jvnet.hudson.plugins.port_allocator;
 import hudson.model.AbstractBuild;
 import hudson.model.Computer;
 import hudson.remoting.Callable;
+import jenkins.security.MasterToSlaveCallable;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.net.ServerSocket;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
-import java.util.WeakHashMap;
+import java.util.*;
 
 
 /**
@@ -21,6 +21,7 @@ import java.util.WeakHashMap;
  */
 public final class PortAllocationManager {
     private final Computer node;
+    private static final Log log = LogFactory.getLog(PortAllocationManager.class);
 
     /** Maximum number of tries to allocate a specific port range. */
     private static final int MAX_TRIES = 100;
@@ -48,6 +49,11 @@ public final class PortAllocationManager {
      *      assigning a random port.
      */
     public synchronized int allocateRandom(AbstractBuild owner, int prefPort) throws InterruptedException, IOException {
+        StringBuilder stringBuilder = new StringBuilder();
+        for (Map.Entry<Integer, AbstractBuild> portBuildEntry : ports.entrySet()) {
+            stringBuilder.append(portBuildEntry.getKey()).append("-->").append(portBuildEntry.getValue()).append("\n");
+        }
+        log.debug("Starting random port allocation - ports currently in use by builds: \n" + stringBuilder);
         int i;
         try {
             // try to allocate preferential port,
@@ -56,7 +62,13 @@ public final class PortAllocationManager {
             // if not available, assign a random port
             i = allocatePort(0);
         }
-        ports.put(i,owner);
+        if (ports.containsKey(i)){
+            log.warn("Port [" + i + "] is not available. Owned by [" + ports.get(i) + "] - re-allocating a random port");
+            allocateRandom(owner, prefPort);
+        } else {
+            ports.put(i,owner);
+            log.info("Port [" + i + "] has been allocated");
+        }
         return i;
     }
 
@@ -64,8 +76,7 @@ public final class PortAllocationManager {
      * Allocate a continuous range of ports within specified limits.
      * The caller is responsible for freeing the individual ports within
      * the allocated range.
-     * @param portAllocator
-     * @param build the current build
+     * @param owner the current build
      * @param start the first in the range of allowable ports
      * @param end the last entry in the range of allowable ports
      * @param count the number of ports to allocate
@@ -212,10 +223,11 @@ public final class PortAllocationManager {
      */
     private int allocatePort(final int port) throws InterruptedException, IOException {
         AbstractBuild owner = ports.get(port);
-        if(owner!=null)
+        if(owner!=null) {
+            log.warn("Port [" + port + "] is not available. Owned by [" + owner + "]");
             throw new PortUnavailableException("Owned by "+owner);
-
-        return node.getChannel().call(new AllocateTask(port));
+        }
+        return node.getChannel().call(new AllocatePortTask(port));
     }
 
     static final class PortUnavailableException extends IOException {
@@ -231,7 +243,7 @@ public final class PortAllocationManager {
         private static final long serialVersionUID = 1L;
     }
 
-    private static final class AllocateTask implements Callable<Integer,IOException> {
+    private static final class AllocateTask extends MasterToSlaveCallable<Integer,IOException> {
         private final int port;
 
         public AllocateTask(int port) {
@@ -254,5 +266,39 @@ public final class PortAllocationManager {
         }
 
         private static final long serialVersionUID = 1L;
+    }
+
+    private static final class AllocatePortTask extends MasterToSlaveCallable<Integer,IOException> {
+
+        Random r;
+        int lowerBound = 8096;
+        int upperBound = 16192;
+        int numOfRetries = 10;
+
+        //TODO solve the port paramether issue
+        AllocatePortTask(int port) {
+            r = new Random();
+        }
+
+        public Integer call() throws IOException {
+            int allocatedPort = -1;
+            int candidates[] = new int[numOfRetries];
+            for (int i = 0; i < numOfRetries; i++) {
+                try {
+                    candidates[i] = (int) (r.nextInt(upperBound - lowerBound) + lowerBound);
+                    ServerSocket server = new ServerSocket(candidates[i]);
+                    allocatedPort = server.getLocalPort();
+                    server.close();
+                    break;
+                } catch (IOException e) {
+                    log.warn("Trying to allocate port " + candidates[i] + " failed");
+                }
+            }
+            if (allocatedPort == -1) {
+                throw new IOException("free port not found affter " + numOfRetries + " attempts. The candidates were:" +
+                        Arrays.toString(candidates));
+            }
+            return allocatedPort;
+        }
     }
 }

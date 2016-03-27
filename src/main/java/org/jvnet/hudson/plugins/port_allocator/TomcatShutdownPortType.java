@@ -4,6 +4,7 @@ import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
 import hudson.remoting.Callable;
+import jenkins.security.MasterToSlaveCallable;
 import net.sf.json.JSONObject;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.StaplerRequest;
@@ -37,7 +38,7 @@ public class TomcatShutdownPortType  extends PortType {
         else
             n = manager.allocateRandom(build, prefPort);
 
-        final class TomcatCleanUpTask implements Callable<Void,IOException>, Serializable {
+        final class TomcatCleanUpTask extends MasterToSlaveCallable<Void,IOException> implements Serializable {
             private final BuildListener buildListener;
 
             public TomcatCleanUpTask(BuildListener buildListener) {

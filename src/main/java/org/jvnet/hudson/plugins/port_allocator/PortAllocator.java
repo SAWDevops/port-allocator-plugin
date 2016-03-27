@@ -52,7 +52,7 @@ public class PortAllocator extends BuildWrapper
         final PortAllocationManager pam = PortAllocationManager.getManager(cur);
         Map<String,Integer> portMap = new HashMap<String,Integer>();
         final List<Port> allocated = new ArrayList<Port>();
-
+        log.info("################### Strarting port allocation for build [" + build.getProject().getDisplayName() + " #" + build.getNumber() + "] ###################");
         for (PortType pt : ports) {
             logger.println("Allocating TCP port "+pt.name);
             int prefPort = prefPortMap.get(pt.name)== null?0:prefPortMap.get(pt.name);
@@ -64,6 +64,12 @@ public class PortAllocator extends BuildWrapper
 
         // TODO: only log messages when we are blocking.
         logger.println("TCP port allocation complete");
+        StringBuilder portsAllocated = new StringBuilder();
+        for (Port port : allocated) {
+            portsAllocated.append(port.get()).append("\n");
+        }
+        log.info("Ports allocated in this build \n" + portsAllocated);
+        log.info("################### Finished port allocation for build [" + build.getProject().getDisplayName() + " #" + build.getNumber() + "] ################### \n\r");
         build.addAction(new AllocatedPortAction(portMap));
 
         return new Environment() {
